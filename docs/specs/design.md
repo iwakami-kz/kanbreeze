@@ -106,14 +106,14 @@ Kanbreeze はモジュール型の Web アプリケーションとして構築�
 - **データソース**: スプリント、バックログ、チケット履歴、通知イベントを参照し、履歴スナップショットを保持。
 
 ## 7. Cross-Cutting Concerns
-- **認証・認可**: すべてのエンドポイントでトークン検証、スコープ評価、ロールチェック、監査ログ記録を行う。CLI/AI エージェントのレビュー必須ポリシーや IP フィルタリングを適用。
-- **監査 & ロギング**: 重要操作（カード移動、権限変更、設定更新）は差分記録。監査ビューとエクスポートを提供。
-- **リアルタイム更新**: WebSocket/SSE とイベントストリームでカード操作、並び替え、コメント、通知を即時配信。長時間セッションのトークン更新に対応。
-- **オフライン & 障害耐性**: 楽観的 UI、ローカル下書き、自動再送。API は冪等性キーを受け付け、再試行時の重複作成を防止。
-- **アクセシビリティ**: コントラスト比準拠、キーボード操作、スクリーンリーダー対応、アニメーション時間制限、二重符号化。
-- **国際化**: テキストは i18n ライブラリで管理し、右から左言語への配慮、タイムゾーン変換を実装。
-- **通知**: メール/アプリ内/プッシュを統一テンプレートで生成し、ユーザーごとのサブスクリプション設定を尊重。
-- **セキュリティ**: CSRF/SQL Injection/XSS 対策、添付ファイルの AV スキャン、秘密情報の暗号化保管。
+- **認証・認可**: すべてのエンドポイントで OAuth 2.1／OIDC に準拠したアクセストークンを検証し、`policy-engine` マイクロサービスで RBAC/ABAC を評価する。CLI/AI エージェントは専用クライアントクレデンシャルを使用し、レビュー必須ポリシーや IP フィルタリングを API ゲートウェイで適用。セッション継続には短命リフレッシュトークンとデバイスバインドを組み合わせる。
+- **監査 & ロギング**: 重要操作（カード移動、権限変更、設定更新）はドメインイベントとして `audit_stream` に発行し、バックグラウンドワーカーが JSON Lines 形式で集中ログストレージと改ざん防止ハッシュチェーンへ記録する。監査ビューとエクスポート API は OpenSearch から直接集計する。
+- **リアルタイム更新**: WebSocket/SSE とイベントストリームでカード操作、並び替え、コメント、通知を即時配信。セッションハートビートを 30 秒ごとに送信し、アクセストークンのローテーションは双方向 RPC で再取得する。
+- **オフライン & 障害耐性**: 楽観的 UI、ローカル下書き、自動再送。API は冪等性キーを受け付け、再試行時の重複作成を防止。クライアントは `service worker` と IndexedDB を利用して最大 72 時間の変更キューを保持し、復帰後に順序保証付きで再送する。
+- **アクセシビリティ**: コントラスト比準拠、キーボード操作、スクリーンリーダー対応、アニメーション時間制限、二重符号化。Storybook と axe-core で CI チェックを実施し、ハイコントラストテーマではフォーカスリングを 3px に拡大する。
+- **国際化**: テキストは i18n ライブラリで管理し、右から左言語への配慮、タイムゾーン変換を実装。翻訳ファイルは FormatJS のメッセージカタログで管理し、ロケール追加は GitHub Actions のローカリゼーションワークフローで自動検証する。
+- **通知**: メール/アプリ内/プッシュを統一テンプレートで生成し、ユーザーごとのサブスクリプション設定を尊重。配信はキュー（BullMQ）経由でバックグラウンドワーカーがチャネル別レート制限を適用する。
+- **セキュリティ**: CSRF/SQL Injection/XSS 対策、添付ファイルの AV スキャン、秘密情報の暗号化保管。Secret は HashiCorp Vault に格納し、アプリケーションは短命トークンで取得する。依存ライブラリは SCA（Dependency Track）で常時監視する。
 
 ## 8. Data Storage Design
 - **RDBMS テーブル例**: `organizations`, `projects`, `boards`, `board_columns`, `tickets`, `ticket_tags`, `ticket_checklist_items`, `backlog_items`, `sprints`, `sprint_metrics`, `users`, `user_profiles`, `role_assignments`, `api_clients`, `audit_events`, `notifications`, `reports`, `report_snapshots`。
@@ -202,5 +202,39 @@ Semantic レイヤは以下の対応で構成し、各テーマは Core レイ�
 3. Storybook で各テーマ/モードのビジュアルリグレッションテストを実施し、ダーク/ハイコントラストでのフォーカスリング可視性を自動
    チェックする。
 4. QA 手順として、カラーコントラストツールによる WCAG AA 準拠確認と、色覚シミュレーターでのテーマ検証をリリース前に義務化する。
+
+
+## 14. Real-time & Offline Experience Architecture
+
+### 14.1 API Gateway & Streaming Strategy
+- **API Gateway**: BFF (Backend for Frontend) として GraphQL/REST ハイブリッドを提供し、認証済み WebSocket ハンドシェイクを仲介する。Gateway は HTTP/2 を前提とし、`/realtime` エンドポイントで WebSocket、SSE は `/events` で提供する。
+- **Event Bus**: ドメインサービスは Kafka 互換の `kanbreeze-events` を利用して `ticket.updated`, `board.reordered`, `comment.created` などのイベントを発行。リアルタイムハブはトピックのコンシューマーとして動作し、プロジェクト/ボード単位でサブスクリプションをフィルタリングする。
+- **Optimistic UI**: クライアントは操作ごとに一意の `clientMutationId` を付与し、即時にローカル状態を更新。サーバー確定後はイベントの `mutationId` 照合で差分を統合し、衝突時は `conflict-resolution` チャンネルでパッチを提示する。
+
+### 14.2 Offline Sync & Resilience
+- **Service Worker**: PWA として登録し、`/api/v1/**` の POST/PUT/PATCH は Background Sync キューに保存。オンライン復帰時に FIFO で再送し、冪等性トークンで重複を抑止する。
+- **Local Drafts**: チケットコメントやバックログ入力は IndexedDB に下書きを保存し、最後に成功した同期時刻を保持。ユーザーは「ローカル変更を表示」ダイアログで衝突解決を行える。
+- **Reconnect Strategy**: 通信断検知後は指数バックオフ（1s, 3s, 9s, 27s）で再接続を試行し、5 回失敗した場合は通知センターに警告を表示。バックグラウンドワーカーは失敗したジョブを Dead Letter Queue に移し、運用ダッシュボードで監視する。
+
+### 14.3 Notification Fan-out
+- **Subscription Preferences**: ユーザー設定 API (`/v1/users/{id}/subscriptions`) でチャンネル別（メール、アプリ内、プッシュ）の ON/OFF と quiet hours を管理。Gateway はリクエストコンテキストに適用済み設定を添付する。
+- **Delivery Workers**: メールは SES 互換 API、プッシュは Web Push（VAPID）、アプリ内は WebSocket/SSE。失敗時はバックオフし、3 回連続失敗した場合はサポートアラートを発報。通知テンプレートは Mustache で定義し、ロケール・アクセシビリティ情報（テキスト読み上げ向け代替）を差し込む。
+
+## 15. Security, Compliance & Globalization Blueprint
+
+### 15.1 Authentication & Authorization Stack
+- **Identity Providers**: メール+MFA は TOTP/Passkey、企業連携は OIDC/SAML をサポートし、Just-in-Time プロビジョニングでユーザーを作成する。API クライアントは OAuth 2.1 Client Credentials として登録し、Scope は `projects:read` `tickets:write` など細粒度に設定する。
+- **Policy Evaluation**: Open Policy Agent (OPA) を Sidecar として導入し、GraphQL/REST リゾルバーから Rego ポリシーを照会。RBAC はロール付与、ABAC は属性（プロジェクト、チーム、タグ、リスクレベル）で制御し、決定ログを監査ストリームに残す。
+- **Session Security**: リフレッシュトークンは回転型、検証失敗時は即座に全セッション無効化。デバイスバインドは WebAuthn キーと組み合わせ、未登録端末では追加の MFA を要求する。
+
+### 15.2 Auditability & Operational Controls
+- **Audit Event Schema**: `actor`, `actor_type`, `action`, `target`, `metadata.diff`, `request_id`, `ip_address`, `user_agent`, `result` を必須項目とし、すべての更新 API で生成。監査ログは 7 年保管し、WORM ストレージに週次アーカイブを取得する。
+- **Compliance Hooks**: 変更承認が必要なプロジェクトでは、AI/CLI エージェント操作に `requires_review` フラグを付与し、承認ワークフローが完了するまで WebSocket 配信を遅延させる。アクセス権変更は Slack/Webhook でセキュリティチームに通知。
+- **Secret Management**: HashiCorp Vault (KV v2) にアプリシークレットを保存し、CI/CD は短命トークンで取得。機密ファイルは KMS でエンベロープ暗号化し、監査証跡を CloudTrail 互換ログに残す。
+
+### 15.3 Internationalization & Accessibility Operations
+- **Localization Pipeline**: 翻訳キーは monorepo の `packages/i18n` に集約し、Phrase 等の TMS と GitHub Actions で同期。Lint で未翻訳キーを検出し、ビルド失敗とする。
+- **RTL & Formatting**: React コンポーネントは `dir` 属性をロケールに応じて切替え、日付・数値は `Intl` API で表示。タイムゾーンはユーザープロファイル設定とブラウザ情報を突合して自動選択。
+- **Accessibility Governance**: WCAG 2.2 AA 達成を目標とし、Design System の Figma トークンと Storybook Docs を連携。ユーザーテストはスクリーンリーダー（NVDA/VoiceOver）とキーボードオンリー操作を四半期ごとに実施し、レポートを監査ログに保存する。
 
 
