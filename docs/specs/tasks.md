@@ -2,8 +2,8 @@
 
 ## 1. デザイン & 横断機能 (`docs/specs/design.md`)
 - [x] 製品全体で共通利用するテーマトークンとライト/ダーク自動切替・色覚配慮設定を実装方針に沿って設計する。（→ §13 Theme Token System）
-- [ ] リアルタイム更新・楽観的UI・オフライン復旧・通知配信などの横断アーキテクチャ（APIゲートウェイ、WebSocket/SSE、バックグラウンドワーカー）を整備する。
-- [ ] 認証/認可、監査ログ、セキュリティ制御（RBAC/ABAC、MFA、監査イベント、シークレット管理）と国際化/アクセシビリティのポリシーを具体的な技術選定に落とし込む。
+- [x] リアルタイム更新・楽観的UI・オフライン復旧・通知配信などの横断アーキテクチャ（APIゲートウェイ、WebSocket/SSE、バックグラウンドワーカー）を整備する。（→ §14 Real-time & Offline Experience Architecture）
+- [x] 認証/認可、監査ログ、セキュリティ制御（RBAC/ABAC、MFA、監査イベント、シークレット管理）と国際化/アクセシビリティのポリシーを具体的な技術選定に落とし込む。（→ §7 Cross-Cutting Concerns, §15 Security, Compliance & Globalization Blueprint）
 
 ## 2. ダッシュボード (`docs/specs/dashboard/requirements.md`)
 - [ ] ロール別ホーム体験（マイタスク、期日接近、未読メンション、スプリント状況、複数プロジェクト比較、セクション開閉/保存、ゲスト制限）を構築する。
