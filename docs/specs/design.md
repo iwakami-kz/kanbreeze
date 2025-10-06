@@ -144,3 +144,63 @@ Kanbreeze はモジュール型の Web アプリケーションとして構築�
 - プラグイン/拡張ポイントの開放による外部連携の拡充。
 - 分析基盤との統合による高度な予測分析や容量計画機能。
 
+## 13. Theme Token System & Adaptive Modes
+
+### 13.1 Token Foundations
+Kanbreeze のテーマは CSS カスタムプロパティとして実装し、**Core（ベースカラー）** と **Semantic（意味付けカラー）** の二層構造で
+提供する。トークンは `kb-color-{group}-{scale}`（0–100のライトネス段階）と `kb-semantic-{role}` の命名規則を採用する。
+
+| Group | Sample Tokens | Purpose |
+| --- | --- | --- |
+| `core-primary` | `kb-color-core-primary-10` `kb-color-core-primary-50` `kb-color-core-primary-90` | アクション、強調ラベル。Soft Light テーマでは `#5B7BDA` を中心に 10=最淡、90=最濃。 |
+| `core-neutral` | `kb-color-core-neutral-05` `kb-color-core-neutral-30` `kb-color-core-neutral-80` | 背景/境界線/テキスト。ライトモードは `#FFFFFF` 〜 `#1F2933`、ダークモードでは逆転。 |
+| `core-accent` | `kb-color-core-accent-20` `kb-color-core-accent-60` | カードアクセント、タグ。Warm Pastel では `#FFB88C`、Calm Mint では `#67C8A3`。 |
+| `core-status` | `kb-color-core-success-*` `kb-color-core-warning-*` `kb-color-core-danger-*` | 成功/警告/危険のベース。WCAG AA を維持するペアリングを定義。 |
+
+Semantic レイヤは以下の対応で構成し、各テーマは Core レイヤから自動算出される。
+
+| Semantic Token | Mapping Rule |
+| --- | --- |
+| `kb-semantic-surface` | ライト: `core-neutral-05`, ダーク: `core-neutral-90` |
+| `kb-semantic-surface-elevated` | `surface` に 4% のアルファ/陰影を追加 |
+| `kb-semantic-text-primary` | ライト: `core-neutral-80`, ダーク: `core-neutral-10` |
+| `kb-semantic-text-inverse` | `text-primary` の 80% 輝度反転 |
+| `kb-semantic-border` | `core-neutral-30`（ライト）または `core-neutral-70`（ダーク） |
+| `kb-semantic-focus-ring` | `core-primary-50` を 2px 外側グローで適用 |
+| `kb-semantic-info/success/warning/danger` | `core-status-*` から輝度 70 の組み合わせ |
+
+### 13.2 Theme Presets
+3 つのプリセットテーマは共通のデザイントークン構造を保ちつつ、ベースヒューとアクセントを切り替える。
+
+| Theme | Primary Base | Accent Base | Supporting Notes |
+| --- | --- | --- | --- |
+| **Soft Light** | `#5B7BDA`（ブルーラベンダー系） | `#89CFF0` | 標準テーマ。コントラスト比 4.8:1 を確保。 |
+| **Warm Pastel** | `#F08475` | `#FFB88C` | リーダー向け。背景は `core-neutral` のトーンを +5% 暖色寄せ。 |
+| **Calm Mint** | `#3FA17F` | `#67C8A3` | 集中モード。通知バッジはコントラスト確保のため `#245744` を使用。 |
+
+テーマはライト/ダーク双方のパレットを持ち、ダークでは `core-neutral` を反転させた上で彩度を 10% 抑制する。コントラスト検証は
+ビルド時の Style Dictionary スクリプトで自動化し、閾値未達の場合は CI を失敗させる。
+
+### 13.3 Color Vision Support
+- **色覚特性モード（Deuteranopia/Protanopia/Tritanopia）**: `core-primary` のヒューを 30° シフトし、輝度差を 15% 強調する。
+- **ハイコントラスト**: `kb-semantic-surface` を #101213、`kb-semantic-text-primary` を #FFFFFF に固定し、アイコンは二重符号
+  化（形状+テキスト）を適用。
+- **警告色補助**: 警告/危険の背景にはパターンテクスチャ（2px ストライプ）を追加して色依存を避ける。
+
+### 13.4 Adaptive Behavior & Preference Storage
+- **自動切替**: OS の `prefers-color-scheme` を初期値とし、ユーザー設定でライト/ダーク/自動/ハイコントラストを選択。変更は即時に
+  `localStorage` とユーザープロファイル API (`PATCH /v1/users/{id}/preferences`) に保存する。
+- **色覚モード**: プロフィール設定から選択し、アクセシビリティ API (`PATCH /v1/users/{id}/accessibility`) で永続化。クライアントは
+  初期ロード時にモード別 CSS を遅延読み込みする。
+- **テーマ共有**: プロジェクトテンプレートと連動し、プロジェクト管理画面から `PUT /v1/projects/{id}/theme` で配布。個人設定との差異
+  は差分マージし、競合時はユーザー優先。
+
+### 13.5 Implementation Checklist
+1. Style Dictionary または Tailwind CSS のカスタムテーマでトークンをビルドし、各テーマ毎に CSS 変数ファイルを出力する。
+2. React アプリでは `ThemeProvider` を拡張し、`prefers-reduced-motion` と `prefers-contrast` をフックして 0.2–0.3 秒のトランジショ
+   ンを適用する。
+3. Storybook で各テーマ/モードのビジュアルリグレッションテストを実施し、ダーク/ハイコントラストでのフォーカスリング可視性を自動
+   チェックする。
+4. QA 手順として、カラーコントラストツールによる WCAG AA 準拠確認と、色覚シミュレーターでのテーマ検証をリリース前に義務化する。
+
+
