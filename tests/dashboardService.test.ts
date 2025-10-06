@@ -9,7 +9,9 @@ import {
   buildWidgetGallery,
   buildPresetUpdateNotification,
   buildSprintInsightCharts,
+  buildThemePalette,
   buildResponsiveWidgetPresentations,
+  buildSemanticThemeTokens,
   diffPresetAgainstLayout,
   calculateFlowIndicators,
   getWidgetDragPreview,
@@ -24,6 +26,9 @@ import {
   resizeWidgetInLayout,
   toggleSectionPresentation,
   undoWidgetRemoval,
+  resolveThemeMode,
+  resolveMotionPreferences,
+  applyBrandThemeCustomisation,
   type LayoutState,
   type KeyboardMoveResult,
   type HomeExperienceInput,
@@ -970,6 +975,121 @@ describe('evaluateBacklogHealth', () => {
     expect(state.stale.count).toBe(3);
     expect(state.priorityMissing).toMatchObject({ warning: true, count: 2 });
     expect(state.summary).toMatchObject({ total: 4, evaluatedAt: '2024-03-31T00:00:00.000Z' });
+  });
+});
+
+describe('buildThemePalette', () => {
+  it('ライトテーマでWCAG準拠のコントラストを維持する', () => {
+    const palette = buildThemePalette('soft-light', { mode: 'light' });
+
+    expect(palette.mode).toBe('light');
+    expect(palette.compliance.surfaceContrast).toBeGreaterThanOrEqual(4.5);
+    expect(palette.compliance.textOnPrimaryContrast).toBeGreaterThanOrEqual(4.5);
+    expect(palette.core.primarySoft).not.toBe(palette.core.primaryStrong);
+    expect(palette.semantic.surface).not.toBe(palette.semantic.surfaceElevated);
+    expect(palette.semantic.focusRing).toMatch(/^#/);
+  });
+
+  it('ダークテーマでも視認性を確保する', () => {
+    const palette = buildThemePalette('warm-pastel', { mode: 'dark' });
+
+    expect(palette.mode).toBe('dark');
+    expect(palette.compliance.surfaceContrast).toBeGreaterThanOrEqual(4.5);
+    expect(palette.core.neutralSurface).not.toBe(palette.core.neutralSurfaceAlt);
+  });
+});
+
+describe('resolveThemeMode', () => {
+  it('高コントラスト設定を優先しアニメーションを抑制する', () => {
+    const resolution = resolveThemeMode({
+      userPreference: 'auto',
+      systemColorScheme: 'dark',
+      systemContrast: 'high',
+      reduceMotion: true,
+      lastMode: 'high-contrast',
+    });
+
+    expect(resolution.mode).toBe('high-contrast');
+    expect(resolution.animate).toBe(false);
+    expect(resolution.transitionDuration).toBe(0);
+    expect(resolution.changed).toBe(false);
+    expect(resolution.source).toBe('system-contrast');
+  });
+
+  it('ユーザー指定を優先してモードを更新する', () => {
+    const resolution = resolveThemeMode({
+      userPreference: 'light',
+      systemColorScheme: 'dark',
+      lastMode: 'dark',
+    });
+
+    expect(resolution.mode).toBe('light');
+    expect(resolution.animate).toBe(true);
+    expect(resolution.transitionDuration).toBeGreaterThanOrEqual(200);
+    expect(resolution.changed).toBe(true);
+    expect(resolution.source).toBe('user');
+  });
+});
+
+describe('buildSemanticThemeTokens', () => {
+  it('セマンティックトークンと8ptグリッドを生成する', () => {
+    const palette = buildThemePalette('calm-mint', { mode: 'dark' });
+    const tokens = buildSemanticThemeTokens(palette);
+
+    expect(tokens.tokens['kb-semantic-surface']).toBe(palette.semantic.surface);
+    expect(tokens.tokens['kb-semantic-focus-ring']).toBe(palette.semantic.focusRing);
+    expect(tokens.grid.baseUnit).toBe(8);
+    expect(tokens.grid.scale).toHaveLength(11);
+    expect(tokens.grid.scale.every((value, index) => value === index * 8)).toBe(true);
+    expect(tokens.focusRing.color).toBe(palette.semantic.focusRing);
+    expect(tokens.focusRing.style).toContain(palette.semantic.focusRing);
+  });
+});
+
+describe('resolveMotionPreferences', () => {
+  it('OSのリデュースモーション設定を尊重する', () => {
+    const prefs = resolveMotionPreferences({ prefersReducedMotion: true, userSetting: 'expressive' });
+
+    expect(prefs.motionEnabled).toBe(false);
+    expect(prefs.durations).toEqual({ gentle: 0, standard: 0, emphasized: 0 });
+    expect(prefs.easing).toEqual({ enter: 'linear', exit: 'linear' });
+  });
+
+  it('穏やかなモーション設定を返す', () => {
+    const prefs = resolveMotionPreferences({ userSetting: 'expressive' });
+
+    expect(prefs.motionEnabled).toBe(true);
+    expect(prefs.durations.emphasized).toBeGreaterThan(prefs.durations.standard);
+    expect(prefs.durations.standard).toBeGreaterThan(prefs.durations.gentle);
+    expect(prefs.easing.enter).toContain('cubic-bezier');
+  });
+});
+
+describe('applyBrandThemeCustomisation', () => {
+  it('ブランドカラーを検証しテナントへ配布する', () => {
+    const basePalette = buildThemePalette('soft-light', { mode: 'light' });
+    const result = applyBrandThemeCustomisation(basePalette, {
+      brandName: 'Acme',
+      primaryColor: '#dde5ff',
+      accentColor: '#ffeeaa',
+      tenants: [
+        { id: 'tenant-1', allowBranding: true },
+        { id: 'tenant-2', allowBranding: false },
+        { id: 'tenant-3', allowBranding: true, preferredMode: 'dark' },
+      ],
+    });
+
+    expect(result.palette.core.primary).not.toBe('#DDE5FF');
+    expect(result.palette.compliance.adjustments.some((adj) => adj.token === 'core.primary')).toBe(true);
+    expect(result.palette.compliance.textOnPrimaryContrast).toBeGreaterThanOrEqual(4.5);
+    expect(result.issues.some((issue) => issue.includes('ブランドカラー'))).toBe(true);
+    expect(result.palette.compliance.warnings).toEqual(result.issues);
+
+    expect(result.distribution).toEqual([
+      { tenantId: 'tenant-1', applied: true },
+      { tenantId: 'tenant-2', applied: false, reason: 'branding-disabled' },
+      { tenantId: 'tenant-3', applied: false, reason: 'mode-mismatch' },
+    ]);
   });
 });
 
