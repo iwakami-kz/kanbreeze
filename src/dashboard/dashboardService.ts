@@ -120,6 +120,216 @@ export interface SectionPresentation {
   showUnreadBadge: boolean;
 }
 
+export type ThemePresetId = 'soft-light' | 'warm-pastel' | 'calm-mint';
+
+export type ThemeMode = 'light' | 'dark';
+
+export interface ThemePaletteOptions {
+  mode?: ThemeMode;
+  targetContrast?: number;
+}
+
+export interface ThemePaletteAdjustment {
+  token: string;
+  from: string;
+  to: string;
+}
+
+export interface ThemePaletteCompliance {
+  targetContrast: number;
+  surfaceContrast: number;
+  textOnPrimaryContrast: number;
+  adjustments: ThemePaletteAdjustment[];
+  warnings: string[];
+}
+
+export interface ThemePalette {
+  id: ThemePresetId;
+  name: string;
+  mode: ThemeMode;
+  core: {
+    primary: string;
+    primarySoft: string;
+    primaryStrong: string;
+    neutralSurface: string;
+    neutralSurfaceAlt: string;
+    neutralText: string;
+    neutralTextInverse: string;
+    accent: string;
+    accentSoft: string;
+    success: string;
+    warning: string;
+    danger: string;
+    info: string;
+  };
+  semantic: {
+    surface: string;
+    surfaceElevated: string;
+    textPrimary: string;
+    textInverse: string;
+    border: string;
+    focusRing: string;
+    info: string;
+    success: string;
+    warning: string;
+    danger: string;
+  };
+  compliance: ThemePaletteCompliance;
+}
+
+export interface ThemeModeResolutionInput {
+  userPreference?: 'light' | 'dark' | 'auto' | 'high-contrast';
+  systemColorScheme?: 'light' | 'dark';
+  systemContrast?: 'no-preference' | 'more' | 'high';
+  reduceMotion?: boolean;
+  lastMode?: 'light' | 'dark' | 'high-contrast';
+}
+
+export interface ThemeModeResolution {
+  mode: 'light' | 'dark' | 'high-contrast';
+  animate: boolean;
+  transitionDuration: number;
+  changed: boolean;
+  source: 'user' | 'system-color' | 'system-contrast';
+}
+
+export interface SemanticTokenSet {
+  tokens: Record<string, string>;
+  grid: {
+    baseUnit: number;
+    scale: number[];
+  };
+  focusRing: {
+    color: string;
+    width: number;
+    offset: number;
+    style: string;
+  };
+}
+
+export interface MotionPreferencesInput {
+  userSetting?: 'calm' | 'standard' | 'expressive';
+  prefersReducedMotion?: boolean;
+}
+
+export interface MotionPreferences {
+  motionEnabled: boolean;
+  durations: {
+    gentle: number;
+    standard: number;
+    emphasized: number;
+  };
+  easing: {
+    enter: string;
+    exit: string;
+  };
+}
+
+export interface TenantThemeTarget {
+  id: string;
+  allowBranding?: boolean;
+  preferredMode?: 'light' | 'dark' | 'high-contrast';
+}
+
+export interface BrandCustomisationInput {
+  brandName: string;
+  primaryColor: string;
+  accentColor?: string;
+  tenants: TenantThemeTarget[];
+  contrastTarget?: number;
+}
+
+export interface BrandCustomisationResult {
+  palette: ThemePalette;
+  issues: string[];
+  distribution: Array<{
+    tenantId: string;
+    applied: boolean;
+    reason?: string;
+  }>;
+}
+
+const THEME_PRESETS: Record<
+  ThemePresetId,
+  {
+    name: string;
+    primary: string;
+    accent: string;
+    neutral: {
+      lightSurface: string;
+      lightSurfaceAlt: string;
+      lightText: string;
+      darkSurface: string;
+      darkSurfaceAlt: string;
+      darkText: string;
+    };
+    status: {
+      success: string;
+      warning: string;
+      danger: string;
+      info: string;
+    };
+  }
+> = {
+  'soft-light': {
+    name: 'Soft Light',
+    primary: '#5B7BDA',
+    accent: '#89CFF0',
+    neutral: {
+      lightSurface: '#F7F9FF',
+      lightSurfaceAlt: '#ECF2FF',
+      lightText: '#1F2933',
+      darkSurface: '#14161C',
+      darkSurfaceAlt: '#1E222C',
+      darkText: '#F5F7FF',
+    },
+    status: {
+      success: '#3FA17F',
+      warning: '#C97A10',
+      danger: '#C94F4F',
+      info: '#3B82F6',
+    },
+  },
+  'warm-pastel': {
+    name: 'Warm Pastel',
+    primary: '#F08475',
+    accent: '#FFB88C',
+    neutral: {
+      lightSurface: '#FFF7F4',
+      lightSurfaceAlt: '#FFE8DF',
+      lightText: '#432B1F',
+      darkSurface: '#211613',
+      darkSurfaceAlt: '#2D1C18',
+      darkText: '#FFF5F1',
+    },
+    status: {
+      success: '#48A37C',
+      warning: '#C47C2B',
+      danger: '#D05B5B',
+      info: '#4C7BD9',
+    },
+  },
+  'calm-mint': {
+    name: 'Calm Mint',
+    primary: '#3FA17F',
+    accent: '#67C8A3',
+    neutral: {
+      lightSurface: '#F3FBF7',
+      lightSurfaceAlt: '#E1F4EA',
+      lightText: '#13392D',
+      darkSurface: '#0F1E1A',
+      darkSurfaceAlt: '#173229',
+      darkText: '#E8FFF5',
+    },
+    status: {
+      success: '#3FA17F',
+      warning: '#C3A032',
+      danger: '#CA5C5C',
+      info: '#2F9AA6',
+    },
+  },
+};
+
 export interface WidgetDefinition {
   id: string;
   title: string;
@@ -2278,4 +2488,416 @@ export function buildPresetUpdateNotification(
     summary,
     changes,
   };
+}
+
+export function buildThemePalette(
+  preset: ThemePresetId,
+  options: ThemePaletteOptions = {},
+): ThemePalette {
+  const base = THEME_PRESETS[preset];
+  if (!base) {
+    throw new Error(`Unknown theme preset: ${preset}`);
+  }
+
+  const mode: ThemeMode = options.mode ?? 'light';
+  const targetContrast = options.targetContrast ?? 4.5;
+  const adjustments: ThemePaletteAdjustment[] = [];
+  const warnings: string[] = [];
+
+  const neutralSurface = mode === 'light' ? base.neutral.lightSurface : base.neutral.darkSurface;
+  const neutralSurfaceAlt = mode === 'light' ? base.neutral.lightSurfaceAlt : base.neutral.darkSurfaceAlt;
+  const neutralTextBase = mode === 'light' ? base.neutral.lightText : base.neutral.darkText;
+  const neutralInverseBase = mode === 'light' ? base.neutral.darkText : base.neutral.lightText;
+
+  let primary = mode === 'light' ? base.primary : mixColors(base.primary, '#0B1020', 0.25);
+  const accent = mode === 'light' ? base.accent : mixColors(base.accent, '#10161F', 0.2);
+
+  primary = ensureContrast(
+    primary,
+    neutralInverseBase,
+    targetContrast,
+    true,
+    'core.primary',
+    adjustments,
+  );
+
+  const primarySoft = mixColors(primary, '#FFFFFF', mode === 'light' ? 0.6 : 0.3);
+  const primaryStrong = mixColors(primary, '#000000', mode === 'light' ? 0.25 : 0.45);
+  const accentSoft = mixColors(accent, '#FFFFFF', mode === 'light' ? 0.5 : 0.25);
+
+  const semanticSurface = adjustSurfaceForBrightness(neutralSurface, mode);
+  const semanticSurfaceElevated = mode === 'light'
+    ? mixColors(semanticSurface, '#000000', 0.06)
+    : mixColors(semanticSurface, '#FFFFFF', 0.12);
+
+  const textPrimary = ensureContrast(
+    neutralTextBase,
+    semanticSurface,
+    targetContrast,
+    true,
+    'semantic.textPrimary',
+    adjustments,
+  );
+  const textInverse = ensureContrast(
+    neutralInverseBase,
+    primary,
+    targetContrast,
+    false,
+    'semantic.textInverse',
+    adjustments,
+  );
+
+  const focusRing = ensureContrast(
+    primary,
+    semanticSurface,
+    3,
+    true,
+    'semantic.focusRing',
+    adjustments,
+  );
+
+  const border = ensureContrast(
+    mode === 'light' ? mixColors(textPrimary, semanticSurface, 0.1) : mixColors(textPrimary, semanticSurface, 0.25),
+    semanticSurface,
+    1.2,
+    true,
+    'semantic.border',
+    adjustments,
+  );
+
+  const palette: ThemePalette = {
+    id: preset,
+    name: base.name,
+    mode,
+    core: {
+      primary,
+      primarySoft,
+      primaryStrong,
+      neutralSurface: semanticSurface,
+      neutralSurfaceAlt: semanticSurfaceElevated,
+      neutralText: textPrimary,
+      neutralTextInverse: textInverse,
+      accent,
+      accentSoft,
+      success: base.status.success,
+      warning: base.status.warning,
+      danger: base.status.danger,
+      info: base.status.info,
+    },
+    semantic: {
+      surface: semanticSurface,
+      surfaceElevated: semanticSurfaceElevated,
+      textPrimary,
+      textInverse,
+      border,
+      focusRing,
+      info: base.status.info,
+      success: base.status.success,
+      warning: base.status.warning,
+      danger: base.status.danger,
+    },
+    compliance: {
+      targetContrast,
+      surfaceContrast: calculateContrast(textPrimary, semanticSurface),
+      textOnPrimaryContrast: calculateContrast(textInverse, primary),
+      adjustments,
+      warnings,
+    },
+  };
+
+  if (palette.compliance.surfaceContrast < targetContrast) {
+    warnings.push(
+      `テキストと背景のコントラストが基準(${targetContrast})を下回っています: ${palette.compliance.surfaceContrast.toFixed(2)}`,
+    );
+  }
+
+  if (palette.compliance.textOnPrimaryContrast < targetContrast) {
+    warnings.push(
+      `ボタン上のテキストコントラストが基準(${targetContrast})を下回っています: ${palette.compliance.textOnPrimaryContrast.toFixed(2)}`,
+    );
+  }
+
+  return palette;
+}
+
+export function resolveThemeMode(
+  input: ThemeModeResolutionInput,
+): ThemeModeResolution {
+  const userPref = input.userPreference ?? 'auto';
+  const systemContrast = input.systemContrast ?? 'no-preference';
+  let mode: 'light' | 'dark' | 'high-contrast';
+  let source: ThemeModeResolution['source'] = 'user';
+
+  if (userPref === 'high-contrast' || systemContrast === 'high') {
+    mode = 'high-contrast';
+    source = userPref === 'high-contrast' ? 'user' : 'system-contrast';
+  } else if (userPref === 'light' || userPref === 'dark') {
+    mode = userPref;
+    source = 'user';
+  } else {
+    mode = input.systemColorScheme === 'dark' ? 'dark' : 'light';
+    source = 'system-color';
+  }
+
+  const reduceMotion = Boolean(input.reduceMotion);
+  const animate = !reduceMotion;
+  const transitionDuration = animate ? clamp(240, 200, 300) : 0;
+  const changed = mode !== (input.lastMode ?? 'light');
+
+  return { mode, animate, transitionDuration, changed, source };
+}
+
+export function buildSemanticThemeTokens(palette: ThemePalette): SemanticTokenSet {
+  const baseUnit = 8;
+  const scale = Array.from({ length: 11 }, (_, index) => index * baseUnit);
+
+  const tokens: Record<string, string> = {
+    'kb-semantic-surface': palette.semantic.surface,
+    'kb-semantic-surface-elevated': palette.semantic.surfaceElevated,
+    'kb-semantic-text-primary': palette.semantic.textPrimary,
+    'kb-semantic-text-inverse': palette.semantic.textInverse,
+    'kb-semantic-border': palette.semantic.border,
+    'kb-semantic-focus-ring': palette.semantic.focusRing,
+    'kb-semantic-info': palette.semantic.info,
+    'kb-semantic-success': palette.semantic.success,
+    'kb-semantic-warning': palette.semantic.warning,
+    'kb-semantic-danger': palette.semantic.danger,
+  };
+
+  return {
+    tokens,
+    grid: {
+      baseUnit,
+      scale,
+    },
+    focusRing: {
+      color: palette.semantic.focusRing,
+      width: 2,
+      offset: 2,
+      style: `0 0 0 2px ${palette.semantic.focusRing}`,
+    },
+  };
+}
+
+export function resolveMotionPreferences(
+  input: MotionPreferencesInput = {},
+): MotionPreferences {
+  const reduce = Boolean(input.prefersReducedMotion);
+  const setting = input.userSetting ?? 'calm';
+
+  if (reduce) {
+    return {
+      motionEnabled: false,
+      durations: {
+        gentle: 0,
+        standard: 0,
+        emphasized: 0,
+      },
+      easing: {
+        enter: 'linear',
+        exit: 'linear',
+      },
+    };
+  }
+
+  const baseDurations = {
+    calm: { gentle: 120, standard: 200, emphasized: 280 },
+    standard: { gentle: 160, standard: 240, emphasized: 320 },
+    expressive: { gentle: 200, standard: 280, emphasized: 360 },
+  };
+
+  const durations = baseDurations[setting] ?? baseDurations.calm;
+
+  return {
+    motionEnabled: true,
+    durations,
+    easing: {
+      enter: 'cubic-bezier(0.33, 1, 0.68, 1)',
+      exit: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    },
+  };
+}
+
+export function applyBrandThemeCustomisation(
+  palette: ThemePalette,
+  input: BrandCustomisationInput,
+): BrandCustomisationResult {
+  const targetContrast = input.contrastTarget ?? palette.compliance.targetContrast;
+  const issues: string[] = [];
+  const adjustments: ThemePaletteAdjustment[] = [];
+
+  const nextPalette: ThemePalette = {
+    ...palette,
+    core: { ...palette.core },
+    semantic: { ...palette.semantic },
+    compliance: { ...palette.compliance, adjustments: [...palette.compliance.adjustments], warnings: [] },
+  };
+
+  const primaryResult = ensureContrast(
+    input.primaryColor,
+    nextPalette.semantic.surface,
+    targetContrast,
+    calculateLuminance(input.primaryColor) <= calculateLuminance(nextPalette.semantic.surface),
+    'core.primary',
+    adjustments,
+  );
+
+  nextPalette.core.primary = primaryResult;
+  nextPalette.core.primarySoft = mixColors(nextPalette.core.primary, '#FFFFFF', nextPalette.mode === 'light' ? 0.6 : 0.3);
+  nextPalette.core.primaryStrong = mixColors(nextPalette.core.primary, '#000000', nextPalette.mode === 'light' ? 0.25 : 0.45);
+  nextPalette.semantic.focusRing = ensureContrast(
+    nextPalette.core.primary,
+    nextPalette.semantic.surface,
+    3,
+    true,
+    'semantic.focusRing',
+    adjustments,
+  );
+
+  const accentColor = input.accentColor ?? nextPalette.core.accent;
+  nextPalette.core.accent = ensureContrast(
+    accentColor,
+    nextPalette.semantic.surface,
+    2.5,
+    calculateLuminance(accentColor) <= calculateLuminance(nextPalette.semantic.surface),
+    'core.accent',
+    adjustments,
+  );
+  nextPalette.core.accentSoft = mixColors(nextPalette.core.accent, '#FFFFFF', nextPalette.mode === 'light' ? 0.5 : 0.25);
+
+  nextPalette.core.neutralTextInverse = ensureContrast(
+    nextPalette.core.neutralTextInverse,
+    nextPalette.core.primary,
+    targetContrast,
+    calculateLuminance(nextPalette.core.neutralTextInverse) >= calculateLuminance(nextPalette.core.primary),
+    'core.neutralTextInverse',
+    adjustments,
+  );
+
+  const surfaceContrast = calculateContrast(nextPalette.core.neutralText, nextPalette.semantic.surface);
+  const buttonContrast = calculateContrast(nextPalette.core.neutralTextInverse, nextPalette.core.primary);
+
+  if (surfaceContrast < targetContrast) {
+    issues.push(
+      `ブランド適用後のテキスト/背景コントラストが基準(${targetContrast})を満たしていません (${surfaceContrast.toFixed(2)})。`,
+    );
+  }
+
+  if (buttonContrast < targetContrast) {
+    issues.push(
+      `ブランド適用後のボタンテキストコントラストが基準(${targetContrast})を満たしていません (${buttonContrast.toFixed(2)})。`,
+    );
+  }
+
+  const distribution = input.tenants.map((tenant) => {
+    if (tenant.allowBranding === false) {
+      return { tenantId: tenant.id, applied: false, reason: 'branding-disabled' };
+    }
+    if (tenant.preferredMode && tenant.preferredMode !== nextPalette.mode) {
+      return { tenantId: tenant.id, applied: false, reason: 'mode-mismatch' };
+    }
+    return { tenantId: tenant.id, applied: true };
+  });
+
+  if (adjustments.length > 0) {
+    issues.push(`ブランドカラーを${adjustments.length}件調整してコントラストを確保しました。`);
+  }
+
+  nextPalette.compliance = {
+    targetContrast,
+    surfaceContrast,
+    textOnPrimaryContrast: buttonContrast,
+    adjustments: [...nextPalette.compliance.adjustments, ...adjustments],
+    warnings: issues.slice(),
+  };
+
+  return {
+    palette: nextPalette,
+    issues,
+    distribution,
+  };
+}
+
+function adjustSurfaceForBrightness(surface: string, mode: ThemeMode): string {
+  if (mode === 'light') {
+    return mixColors(surface, '#FFFFFF', 0.1);
+  }
+  return mixColors(surface, '#000000', 0.2);
+}
+
+function ensureContrast(
+  color: string,
+  reference: string,
+  target: number,
+  preferDarkening: boolean,
+  token: string,
+  adjustments: ThemePaletteAdjustment[],
+): string {
+  let current = normalizeHex(color);
+  const initial = current;
+  let contrast = calculateContrast(current, reference);
+  const mixTarget = preferDarkening ? '#000000' : '#FFFFFF';
+  let step = 0;
+
+  while (contrast < target && step < 12) {
+    current = mixColors(current, mixTarget, 0.1);
+    contrast = calculateContrast(current, reference);
+    step += 1;
+  }
+
+  if (current !== initial) {
+    adjustments.push({ token, from: initial, to: current });
+  }
+
+  return current;
+}
+
+function mixColors(color: string, withColor: string, amount: number): string {
+  const base = hexToRgb(normalizeHex(color));
+  const blend = hexToRgb(normalizeHex(withColor));
+  const ratio = clamp(amount, 0, 1);
+  const r = Math.round(base.r + (blend.r - base.r) * ratio);
+  const g = Math.round(base.g + (blend.g - base.g) * ratio);
+  const b = Math.round(base.b + (blend.b - base.b) * ratio);
+  return rgbToHex(r, g, b);
+}
+
+function normalizeHex(color: string): string {
+  if (color.startsWith('#')) {
+    if (color.length === 4) {
+      return `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`.toUpperCase();
+    }
+    return color.toUpperCase();
+  }
+  return color;
+}
+
+function hexToRgb(color: string): { r: number; g: number; b: number } {
+  const normalized = normalizeHex(color);
+  const value = normalized.replace('#', '');
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return { r, g, b };
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
+}
+
+function calculateLuminance(color: string): number {
+  const { r, g, b } = hexToRgb(color);
+  const channel = (value: number) => {
+    const c = value / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+function calculateContrast(foreground: string, background: string): number {
+  const lumA = calculateLuminance(foreground);
+  const lumB = calculateLuminance(background);
+  const lighter = Math.max(lumA, lumB);
+  const darker = Math.min(lumA, lumB);
+  return Number(((lighter + 0.05) / (darker + 0.05)).toFixed(2));
 }
