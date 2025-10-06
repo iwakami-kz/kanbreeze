@@ -198,6 +198,187 @@ export interface WidgetGalleryOptions {
   limit?: number;
 }
 
+export interface SprintChartPoint {
+  date: string;
+  value: number | null;
+}
+
+export interface SprintInsightSeries {
+  id: string;
+  label: string;
+  points: SprintChartPoint[];
+}
+
+export interface SprintInsightChart {
+  id: 'burndown' | 'burnup' | 'cumulative-flow';
+  title: string;
+  series: SprintInsightSeries[];
+  missingRanges: Array<{ start: string; end: string }>;
+  interactions: { zoom: boolean; rangeSelection: boolean };
+}
+
+export interface SprintInsightInput {
+  burndown: Array<{ date: string; remaining?: number | null }>;
+  burnup: Array<{ date: string; completed?: number | null; scope?: number | null }>;
+  cumulativeFlow: Array<{
+    date: string;
+    backlog?: number | null;
+    inProgress?: number | null;
+    done?: number | null;
+  }>;
+  focusRange?: { start: string; end: string };
+}
+
+export interface SprintInsightState {
+  charts: SprintInsightChart[];
+  focusRange?: { start: string; end: string };
+}
+
+export interface KanbanLaneStatus {
+  id: string;
+  name: string;
+  wipLimit?: number;
+  currentWip: number;
+}
+
+export interface FlowMetricSample {
+  leadTimeHours: number;
+  cycleTimeHours: number;
+}
+
+export interface FlowIndicatorOptions {
+  now?: Date;
+  filters?: Record<string, unknown>;
+}
+
+export interface FlowIndicatorWarning {
+  laneId: string;
+  laneName: string;
+  currentWip: number;
+  wipLimit?: number;
+  severity: 'warning' | 'critical';
+  message: string;
+}
+
+export interface FlowIndicatorMetric {
+  median: number;
+  p90: number;
+  sampleSize: number;
+}
+
+export interface FlowIndicatorState {
+  warnings: FlowIndicatorWarning[];
+  leadTime: FlowIndicatorMetric;
+  cycleTime: FlowIndicatorMetric;
+  refreshedAt: string;
+  filters?: Record<string, unknown>;
+}
+
+export interface TicketInsight {
+  id: string;
+  title: string;
+  dueDate?: string;
+  completed?: boolean;
+  assigneeId?: string;
+  assigneeName?: string;
+  labels?: string[];
+}
+
+export interface OverdueTicketSummaryOptions {
+  now?: Date;
+  aggregation?: 'assignee' | 'label';
+  filters?: Record<string, unknown>;
+}
+
+export interface OverdueTicketBadge {
+  id: string;
+  title: string;
+  overdueDays: number;
+  badge: '超過';
+}
+
+export interface OverdueAggregationRow {
+  key: string;
+  label: string;
+  count: number;
+  overdueDays: number;
+}
+
+export interface OverdueTicketSummary {
+  tickets: OverdueTicketBadge[];
+  aggregation: OverdueAggregationRow[];
+  export: {
+    metadata: {
+      generatedAt: string;
+      filters: Record<string, unknown>;
+      aggregation: 'assignee' | 'label';
+    };
+  };
+}
+
+export interface CommentEngagementTrendPoint {
+  weekStart: string;
+  commentCount: number;
+  averageThreadDurationHours: number;
+}
+
+export interface CommentThreadSummary {
+  id: string;
+  lastCommentAt: string;
+  lastRespondedAt?: string;
+  unreadMentions: number;
+  weeklyActivity: CommentEngagementTrendPoint[];
+}
+
+export interface CommentEngagementOptions {
+  now?: Date;
+}
+
+export interface CommentEngagementState {
+  needsResponse: Array<{ threadId: string; pendingHours: number }>;
+  trend: {
+    labels: string[];
+    commentCount: number[];
+    averageThreadDurationHours: number[];
+  };
+  unreadMentionCount: number;
+  generatedAt: string;
+}
+
+export interface BacklogItemSummary {
+  id: string;
+  title: string;
+  estimate?: number | null;
+  updatedAt: string;
+  priority?: string | null;
+  url?: string;
+}
+
+export interface BacklogHealthOptions {
+  now?: Date;
+  maxDetail?: number;
+}
+
+export interface BacklogHealthState {
+  unestimated: {
+    count: number;
+    topItems: Array<{ id: string; title: string; url?: string }>;
+  };
+  stale: {
+    count: number;
+    items: Array<{ id: string; title: string; daysSinceUpdate: number }>;
+  };
+  priorityMissing: {
+    count: number;
+    ratio: number;
+    warning: boolean;
+  };
+  summary: {
+    total: number;
+    evaluatedAt: string;
+  };
+}
+
 export interface WidgetGalleryListItem {
   id: string;
   title: string;
@@ -755,6 +936,409 @@ export function buildWidgetGallery(
     query,
     results,
     preview,
+  };
+}
+
+function normaliseDate(value: string): number {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    throw new Error(`Invalid date value: ${value}`);
+  }
+  return timestamp;
+}
+
+function sortByDateAscending<T extends { date: string }>(entries: T[]): T[] {
+  return [...entries].sort((a, b) => normaliseDate(a.date) - normaliseDate(b.date));
+}
+
+function clampRange(
+  range?: { start: string; end: string },
+): { start: string; end: string } | undefined {
+  if (!range) {
+    return undefined;
+  }
+  const startTime = normaliseDate(range.start);
+  const endTime = normaliseDate(range.end);
+  if (startTime <= endTime) {
+    return range;
+  }
+  return { start: range.end, end: range.start };
+}
+
+function filterByRange<T extends { date: string }>(
+  points: T[],
+  range?: { start: string; end: string },
+): T[] {
+  if (!range) {
+    return points;
+  }
+
+  const start = normaliseDate(range.start);
+  const end = normaliseDate(range.end);
+  return points.filter((point) => {
+    const time = normaliseDate(point.date);
+    return time >= start && time <= end;
+  });
+}
+
+function toChartPoints(
+  entries: Array<{ date: string; value?: number | null }>,
+): SprintChartPoint[] {
+  return sortByDateAscending(entries).map((entry) => ({
+    date: entry.date,
+    value: entry.value ?? null,
+  }));
+}
+
+function detectMissingRanges(points: SprintChartPoint[]): Array<{ start: string; end: string }> {
+  const ranges: Array<{ start: string; end: string }> = [];
+  let currentStart: string | undefined;
+
+  for (const point of points) {
+    if (point.value === null || Number.isNaN(point.value)) {
+      if (!currentStart) {
+        currentStart = point.date;
+      }
+    } else if (currentStart) {
+      ranges.push({ start: currentStart, end: point.date });
+      currentStart = undefined;
+    }
+  }
+
+  if (currentStart) {
+    const lastPoint = points[points.length - 1];
+    ranges.push({ start: currentStart, end: lastPoint?.date ?? currentStart });
+  }
+
+  return ranges;
+}
+
+export function buildSprintInsightCharts(input: SprintInsightInput): SprintInsightState {
+  const focusRange = clampRange(input.focusRange);
+
+  const burndownPoints = filterByRange(
+    toChartPoints(input.burndown.map((point) => ({ date: point.date, value: point.remaining }))),
+    focusRange,
+  );
+
+  const burnupCompleted = filterByRange(
+    toChartPoints(input.burnup.map((point) => ({ date: point.date, value: point.completed }))),
+    focusRange,
+  );
+
+  const burnupScope = filterByRange(
+    toChartPoints(input.burnup.map((point) => ({ date: point.date, value: point.scope }))),
+    focusRange,
+  );
+
+  const cumulativeBacklog = filterByRange(
+    toChartPoints(input.cumulativeFlow.map((point) => ({ date: point.date, value: point.backlog }))),
+    focusRange,
+  );
+
+  const cumulativeInProgress = filterByRange(
+    toChartPoints(input.cumulativeFlow.map((point) => ({ date: point.date, value: point.inProgress }))),
+    focusRange,
+  );
+
+  const cumulativeDone = filterByRange(
+    toChartPoints(input.cumulativeFlow.map((point) => ({ date: point.date, value: point.done }))),
+    focusRange,
+  );
+
+  const charts: SprintInsightChart[] = [
+    {
+      id: 'burndown',
+      title: 'バーンダウン',
+      series: [
+        {
+          id: 'remaining',
+          label: '残ポイント',
+          points: burndownPoints,
+        },
+      ],
+      missingRanges: detectMissingRanges(burndownPoints),
+      interactions: { zoom: true, rangeSelection: true },
+    },
+    {
+      id: 'burnup',
+      title: 'バーンアップ',
+      series: [
+        {
+          id: 'completed',
+          label: '完了ポイント',
+          points: burnupCompleted,
+        },
+        {
+          id: 'scope',
+          label: '総スコープ',
+          points: burnupScope,
+        },
+      ],
+      missingRanges: [
+        ...detectMissingRanges(burnupCompleted),
+        ...detectMissingRanges(burnupScope),
+      ],
+      interactions: { zoom: true, rangeSelection: true },
+    },
+    {
+      id: 'cumulative-flow',
+      title: '累積フロー',
+      series: [
+        { id: 'backlog', label: 'バックログ', points: cumulativeBacklog },
+        { id: 'in-progress', label: '進行中', points: cumulativeInProgress },
+        { id: 'done', label: '完了', points: cumulativeDone },
+      ],
+      missingRanges: [
+        ...detectMissingRanges(cumulativeBacklog),
+        ...detectMissingRanges(cumulativeInProgress),
+        ...detectMissingRanges(cumulativeDone),
+      ],
+      interactions: { zoom: true, rangeSelection: true },
+    },
+  ];
+
+  return {
+    charts,
+    focusRange,
+  };
+}
+
+function percentile(values: number[], ratio: number): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = (sorted.length - 1) * ratio;
+  const lowerIndex = Math.floor(rank);
+  const upperIndex = Math.ceil(rank);
+  if (lowerIndex === upperIndex) {
+    return sorted[lowerIndex];
+  }
+  const lower = sorted[lowerIndex];
+  const upper = sorted[upperIndex];
+  const weight = rank - lowerIndex;
+  return lower + (upper - lower) * weight;
+}
+
+function buildMetric(samples: number[]): FlowIndicatorMetric {
+  return {
+    median: percentile(samples, 0.5),
+    p90: percentile(samples, 0.9),
+    sampleSize: samples.length,
+  };
+}
+
+export function calculateFlowIndicators(
+  lanes: KanbanLaneStatus[],
+  samples: FlowMetricSample[],
+  options: FlowIndicatorOptions = {},
+): FlowIndicatorState {
+  const now = options.now ?? new Date();
+
+  const warnings: FlowIndicatorWarning[] = lanes
+    .filter((lane) => lane.wipLimit !== undefined && lane.wipLimit !== null)
+    .filter((lane) => lane.wipLimit !== undefined && lane.currentWip > (lane.wipLimit ?? 0))
+    .map((lane) => {
+      const limit = lane.wipLimit ?? 0;
+      const ratio = limit === 0 ? Infinity : lane.currentWip / limit;
+      const severity: FlowIndicatorWarning['severity'] = ratio >= 1.2 ? 'critical' : 'warning';
+      return {
+        laneId: lane.id,
+        laneName: lane.name,
+        currentWip: lane.currentWip,
+        wipLimit: lane.wipLimit,
+        severity,
+        message: `WIP制限${lane.wipLimit}を${lane.currentWip}件で超過しています`,
+      };
+    });
+
+  const leadSamples = samples.map((sample) => sample.leadTimeHours).filter((value) => value >= 0);
+  const cycleSamples = samples
+    .map((sample) => sample.cycleTimeHours)
+    .filter((value) => value >= 0);
+
+  return {
+    warnings,
+    leadTime: buildMetric(leadSamples),
+    cycleTime: buildMetric(cycleSamples),
+    refreshedAt: now.toISOString(),
+    filters: options.filters && Object.keys(options.filters).length > 0 ? { ...options.filters } : undefined,
+  };
+}
+
+function daysBetween(now: Date, target: string): number {
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const diff = now.getTime() - normaliseDate(target);
+  return Math.max(0, Math.ceil(diff / msPerDay));
+}
+
+export function summariseOverdueTickets(
+  tickets: TicketInsight[],
+  options: OverdueTicketSummaryOptions = {},
+): OverdueTicketSummary {
+  const now = options.now ?? new Date();
+  const aggregationMode = options.aggregation ?? 'assignee';
+
+  const overdueTickets = tickets
+    .filter((ticket) => !!ticket.dueDate && !ticket.completed && normaliseDate(ticket.dueDate) < now.getTime())
+    .map((ticket) => ({
+      id: ticket.id,
+      title: ticket.title,
+      overdueDays: daysBetween(now, ticket.dueDate!),
+      badge: '超過' as const,
+      assigneeId: ticket.assigneeId ?? 'unassigned',
+      assigneeName: ticket.assigneeName ?? '未割り当て',
+      labels: ticket.labels ?? ['未設定'],
+    }));
+
+  const aggregationMap = new Map<string, { label: string; count: number; overdueDays: number }>();
+
+  for (const ticket of overdueTickets) {
+    if (aggregationMode === 'assignee') {
+      const key = ticket.assigneeId ?? 'unassigned';
+      const label = ticket.assigneeName ?? '未割り当て';
+      const entry = aggregationMap.get(key) ?? { label, count: 0, overdueDays: 0 };
+      entry.count += 1;
+      entry.overdueDays += ticket.overdueDays;
+      aggregationMap.set(key, entry);
+    } else {
+      const labels = ticket.labels && ticket.labels.length > 0 ? ticket.labels : ['未設定'];
+      for (const label of labels) {
+        const key = label;
+        const entry = aggregationMap.get(key) ?? { label, count: 0, overdueDays: 0 };
+        entry.count += 1;
+        entry.overdueDays += ticket.overdueDays;
+        aggregationMap.set(key, entry);
+      }
+    }
+  }
+
+  const aggregation: OverdueAggregationRow[] = [...aggregationMap.entries()]
+    .map(([key, value]) => ({ key, label: value.label, count: value.count, overdueDays: value.overdueDays }))
+    .sort((a, b) => b.count - a.count || b.overdueDays - a.overdueDays);
+
+  return {
+    tickets: overdueTickets.map(({ id, title, overdueDays }) => ({ id, title, overdueDays, badge: '超過' as const })),
+    aggregation,
+    export: {
+      metadata: {
+        generatedAt: now.toISOString(),
+        filters: options.filters ? { ...options.filters } : {},
+        aggregation: aggregationMode,
+      },
+    },
+  };
+}
+
+export function analyseCommentEngagement(
+  threads: CommentThreadSummary[],
+  options: CommentEngagementOptions = {},
+): CommentEngagementState {
+  const now = options.now ?? new Date();
+  const needsResponse: Array<{ threadId: string; pendingHours: number }> = [];
+  let unreadMentionCount = 0;
+
+  for (const thread of threads) {
+    unreadMentionCount += thread.unreadMentions;
+    const lastCommentAt = normaliseDate(thread.lastCommentAt);
+    const lastResponseAt = thread.lastRespondedAt ? normaliseDate(thread.lastRespondedAt) : undefined;
+    const pending = !lastResponseAt || lastResponseAt < lastCommentAt;
+    const pendingHours = (now.getTime() - lastCommentAt) / (1000 * 60 * 60);
+    if (pending && pendingHours >= 24) {
+      needsResponse.push({ threadId: thread.id, pendingHours: Math.round(pendingHours * 10) / 10 });
+    }
+  }
+
+  needsResponse.sort((a, b) => b.pendingHours - a.pendingHours);
+
+  const trendPoints = sortByDateAscending(
+    threads.flatMap((thread) =>
+      thread.weeklyActivity.map((point) => ({ ...point, date: point.weekStart })),
+    ),
+  );
+
+  const trendMap = new Map<string, { commentCount: number; averageThreadDurationHours: number[] }>();
+  for (const point of trendPoints) {
+    const existing = trendMap.get(point.weekStart) ?? { commentCount: 0, averageThreadDurationHours: [] };
+    existing.commentCount += point.commentCount;
+    existing.averageThreadDurationHours.push(point.averageThreadDurationHours);
+    trendMap.set(point.weekStart, existing);
+  }
+
+  const trendLabels = [...trendMap.keys()].sort((a, b) => normaliseDate(a) - normaliseDate(b));
+  const commentCountSeries: number[] = [];
+  const durationSeries: number[] = [];
+
+  for (const label of trendLabels) {
+    const entry = trendMap.get(label)!;
+    const averageDuration = entry.averageThreadDurationHours.length
+      ? entry.averageThreadDurationHours.reduce((sum, value) => sum + value, 0) /
+        entry.averageThreadDurationHours.length
+      : 0;
+    commentCountSeries.push(entry.commentCount);
+    durationSeries.push(Math.round(averageDuration * 10) / 10);
+  }
+
+  return {
+    needsResponse,
+    trend: {
+      labels: trendLabels,
+      commentCount: commentCountSeries,
+      averageThreadDurationHours: durationSeries,
+    },
+    unreadMentionCount,
+    generatedAt: now.toISOString(),
+  };
+}
+
+export function evaluateBacklogHealth(
+  items: BacklogItemSummary[],
+  options: BacklogHealthOptions = {},
+): BacklogHealthState {
+  const now = options.now ?? new Date();
+  const maxDetail = Math.max(1, Math.floor(options.maxDetail ?? 5));
+
+  const unestimatedItems = items.filter((item) => item.estimate === undefined || item.estimate === null);
+
+  const staleItems = items.filter((item) => daysBetween(now, item.updatedAt) > 30);
+
+  const priorityMissingItems = items.filter((item) => !item.priority);
+
+  const sortedUnestimated = [...unestimatedItems].sort(
+    (a, b) => normaliseDate(a.updatedAt) - normaliseDate(b.updatedAt),
+  );
+
+  const sortedStale = [...staleItems].sort(
+    (a, b) => normaliseDate(b.updatedAt) - normaliseDate(a.updatedAt),
+  );
+
+  return {
+    unestimated: {
+      count: unestimatedItems.length,
+      topItems: sortedUnestimated.slice(0, maxDetail).map((item) => ({
+        id: item.id,
+        title: item.title,
+        url: item.url,
+      })),
+    },
+    stale: {
+      count: staleItems.length,
+      items: sortedStale.slice(0, maxDetail).map((item) => ({
+        id: item.id,
+        title: item.title,
+        daysSinceUpdate: daysBetween(now, item.updatedAt),
+      })),
+    },
+    priorityMissing: {
+      count: priorityMissingItems.length,
+      ratio: items.length === 0 ? 0 : priorityMissingItems.length / items.length,
+      warning: items.length === 0 ? false : priorityMissingItems.length / items.length > 0.2,
+    },
+    summary: {
+      total: items.length,
+      evaluatedAt: now.toISOString(),
+    },
   };
 }
 

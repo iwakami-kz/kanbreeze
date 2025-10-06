@@ -8,14 +8,19 @@ import {
   buildSprintSummary,
   buildWidgetGallery,
   buildPresetUpdateNotification,
+  buildSprintInsightCharts,
   buildResponsiveWidgetPresentations,
   diffPresetAgainstLayout,
+  calculateFlowIndicators,
   getWidgetDragPreview,
   getWidgetSizePresets,
+  analyseCommentEngagement,
   mergePresetIntoLayout,
   moveWidgetWithKeyboard,
   removeWidgetWithUndo,
   reorderWidgetPosition,
+  summariseOverdueTickets,
+  evaluateBacklogHealth,
   resizeWidgetInLayout,
   toggleSectionPresentation,
   undoWidgetRemoval,
@@ -29,6 +34,12 @@ import {
   type WidgetDefinition,
   type WidgetAuditLogEntry,
   type WidgetRemovalResult,
+  type SprintInsightInput,
+  type KanbanLaneStatus,
+  type FlowMetricSample,
+  type TicketInsight,
+  type CommentThreadSummary,
+  type BacklogItemSummary,
 } from '../src/dashboard/dashboardService';
 
 describe('buildHomeExperience', () => {
@@ -730,3 +741,235 @@ describe('Dashboard presets management', () => {
     );
   });
 });
+
+describe('buildSprintInsightCharts', () => {
+  const input: SprintInsightInput = {
+    burndown: [
+      { date: '2024-03-01', remaining: 40 },
+      { date: '2024-03-02', remaining: null },
+      { date: '2024-03-03', remaining: 28 },
+      { date: '2024-03-04', remaining: 20 },
+    ],
+    burnup: [
+      { date: '2024-03-01', completed: 0, scope: 40 },
+      { date: '2024-03-02', completed: null, scope: 44 },
+      { date: '2024-03-03', completed: 18, scope: null },
+      { date: '2024-03-04', completed: 26, scope: 45 },
+    ],
+    cumulativeFlow: [
+      { date: '2024-03-01', backlog: 25, inProgress: 10, done: 5 },
+      { date: '2024-03-02', backlog: null, inProgress: 12, done: 6 },
+      { date: '2024-03-03', backlog: 24, inProgress: null, done: 8 },
+      { date: '2024-03-04', backlog: 23, inProgress: 14, done: 9 },
+    ],
+    focusRange: { start: '2024-03-04', end: '2024-03-02' },
+  };
+
+  it('3種類のチャートと欠損範囲、インタラクション設定を返す', () => {
+    const state = buildSprintInsightCharts(input);
+
+    expect(state.charts).toHaveLength(3);
+    expect(state.focusRange).toEqual({ start: '2024-03-02', end: '2024-03-04' });
+
+    const burndown = state.charts.find((chart) => chart.id === 'burndown');
+    expect(burndown?.series[0].points).toHaveLength(3);
+    expect(burndown?.series[0].points.some((point) => point.value === null)).toBe(true);
+    expect(burndown?.missingRanges[0]).toEqual({ start: '2024-03-02', end: '2024-03-03' });
+    expect(burndown?.interactions).toEqual({ zoom: true, rangeSelection: true });
+
+    const burnup = state.charts.find((chart) => chart.id === 'burnup');
+    expect(burnup?.series).toHaveLength(2);
+    expect(burnup?.missingRanges.length).toBeGreaterThan(0);
+  });
+});
+
+describe('calculateFlowIndicators', () => {
+  const lanes: KanbanLaneStatus[] = [
+    { id: 'todo', name: 'To Do', wipLimit: 5, currentWip: 4 },
+    { id: 'doing', name: 'Doing', wipLimit: 3, currentWip: 5 },
+  ];
+
+  const samples: FlowMetricSample[] = [
+    { leadTimeHours: 24, cycleTimeHours: 12 },
+    { leadTimeHours: 30, cycleTimeHours: 15 },
+    { leadTimeHours: 48, cycleTimeHours: 20 },
+  ];
+
+  it('WIP超過の警告と指標統計を返す', () => {
+    const state = calculateFlowIndicators(lanes, samples, {
+      now: new Date('2024-03-10T00:00:00Z'),
+    });
+
+    expect(state.warnings).toHaveLength(1);
+    expect(state.warnings[0]).toMatchObject({
+      laneId: 'doing',
+      severity: 'critical',
+    });
+
+    expect(state.leadTime).toMatchObject({ median: 30, sampleSize: 3 });
+    expect(state.cycleTime.p90).toBeCloseTo(19, 0);
+    expect(state.refreshedAt).toBe('2024-03-10T00:00:00.000Z');
+  });
+
+  it('フィルタ適用時に統計を再計算し、フィルタ情報を保持する', () => {
+    const state = calculateFlowIndicators(lanes, samples.slice(0, 1), {
+      now: new Date('2024-03-11T00:00:00Z'),
+      filters: { projectId: 'alpha' },
+    });
+
+    expect(state.leadTime).toMatchObject({ median: 24, p90: 24, sampleSize: 1 });
+    expect(state.filters).toEqual({ projectId: 'alpha' });
+  });
+});
+
+describe('summariseOverdueTickets', () => {
+  const tickets: TicketInsight[] = [
+    {
+      id: 't1',
+      title: 'テストチケット1',
+      dueDate: '2024-03-01',
+      completed: false,
+      assigneeId: 'u1',
+      assigneeName: 'Alice',
+      labels: ['frontend', 'bug'],
+    },
+    {
+      id: 't2',
+      title: 'テストチケット2',
+      dueDate: '2024-02-28',
+      completed: false,
+      assigneeId: 'u2',
+      assigneeName: 'Bob',
+      labels: [],
+    },
+    {
+      id: 't3',
+      title: '完了済み',
+      dueDate: '2024-02-27',
+      completed: true,
+    },
+    {
+      id: 't4',
+      title: '未来期日',
+      dueDate: '2024-03-10',
+      completed: false,
+      assigneeId: 'u3',
+      assigneeName: 'Carol',
+    },
+  ];
+
+  it('期日超過チケットと担当者別集計、エクスポートメタを生成する', () => {
+    const summary = summariseOverdueTickets(tickets, {
+      now: new Date('2024-03-05T00:00:00Z'),
+      filters: { sprint: '2024-03' },
+    });
+
+    expect(summary.tickets).toHaveLength(2);
+    expect(summary.tickets[0]).toMatchObject({ badge: '超過' });
+    expect(summary.aggregation).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'u1', count: 1 }),
+        expect.objectContaining({ key: 'u2', count: 1 }),
+      ]),
+    );
+    expect(summary.export.metadata).toMatchObject({
+      filters: { sprint: '2024-03' },
+      aggregation: 'assignee',
+    });
+  });
+
+  it('ラベル別集計を返す', () => {
+    const summary = summariseOverdueTickets(tickets, {
+      now: new Date('2024-03-05T00:00:00Z'),
+      aggregation: 'label',
+    });
+
+    expect(summary.aggregation.map((row) => row.label)).toEqual(
+      expect.arrayContaining(['frontend', 'bug', '未設定']),
+    );
+  });
+});
+
+describe('analyseCommentEngagement', () => {
+  const threads: CommentThreadSummary[] = [
+    {
+      id: 'thread-1',
+      lastCommentAt: '2024-03-01T00:00:00Z',
+      lastRespondedAt: '2024-02-29T12:00:00Z',
+      unreadMentions: 2,
+      weeklyActivity: [
+        { weekStart: '2024-02-26', commentCount: 4, averageThreadDurationHours: 12 },
+      ],
+    },
+    {
+      id: 'thread-2',
+      lastCommentAt: '2024-03-04T12:00:00Z',
+      lastRespondedAt: '2024-03-04T13:00:00Z',
+      unreadMentions: 1,
+      weeklyActivity: [
+        { weekStart: '2024-02-26', commentCount: 2, averageThreadDurationHours: 8 },
+        { weekStart: '2024-03-04', commentCount: 5, averageThreadDurationHours: 10 },
+      ],
+    },
+  ];
+
+  it('要返信リスト、トレンド、未読メンション数を集計する', () => {
+    const state = analyseCommentEngagement(threads, {
+      now: new Date('2024-03-05T12:00:00Z'),
+    });
+
+    expect(state.needsResponse).toEqual([
+      expect.objectContaining({ threadId: 'thread-1' }),
+    ]);
+    expect(state.unreadMentionCount).toBe(3);
+    expect(state.trend.labels).toEqual(['2024-02-26', '2024-03-04']);
+    expect(state.trend.commentCount).toEqual([6, 5]);
+    expect(state.trend.averageThreadDurationHours[0]).toBeCloseTo(10, 1);
+    expect(state.generatedAt).toBe('2024-03-05T12:00:00.000Z');
+  });
+});
+
+describe('evaluateBacklogHealth', () => {
+  const items: BacklogItemSummary[] = [
+    {
+      id: 'b1',
+      title: '古い未見積',
+      estimate: null,
+      updatedAt: '2024-01-01T00:00:00Z',
+      priority: 'high',
+    },
+    {
+      id: 'b2',
+      title: '優先度未設定',
+      estimate: 3,
+      updatedAt: '2024-02-20T00:00:00Z',
+      priority: null,
+    },
+    {
+      id: 'b3',
+      title: '古い優先度未設定',
+      estimate: 5,
+      updatedAt: '2023-12-15T00:00:00Z',
+      priority: null,
+    },
+    {
+      id: 'b4',
+      title: '新しい未見積',
+      updatedAt: '2024-03-01T00:00:00Z',
+      priority: 'low',
+    },
+  ];
+
+  it('バックログ健全性の指標と詳細リストを返す', () => {
+    const state = evaluateBacklogHealth(items, {
+      now: new Date('2024-03-31T00:00:00Z'),
+    });
+
+    expect(state.unestimated.count).toBe(2);
+    expect(state.unestimated.topItems[0].id).toBe('b1');
+    expect(state.stale.count).toBe(3);
+    expect(state.priorityMissing).toMatchObject({ warning: true, count: 2 });
+    expect(state.summary).toMatchObject({ total: 4, evaluatedAt: '2024-03-31T00:00:00.000Z' });
+  });
+});
+
