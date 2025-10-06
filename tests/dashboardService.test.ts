@@ -2,49 +2,95 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addWidgetToLayout,
+  analyseCommentEngagement,
+  applyBrandThemeCustomisation,
+  applyDashboardSecurityGuards,
   applyGuestRestrictions,
+  applyNotificationMuteRules,
+  buildAccessibilitySupport,
+  buildAlertBannerState,
+  buildCommandPalette,
+  buildEmbeddedWidgetConfig,
   buildHomeExperience,
-  buildProjectComparison,
-  buildSprintSummary,
-  buildWidgetGallery,
+  buildNotificationInbox,
   buildPresetUpdateNotification,
-  buildSprintInsightCharts,
-  buildThemePalette,
+  buildPresetUpdateNotification,
+  buildProjectComparison,
+  buildQuickFilterState,
   buildResponsiveWidgetPresentations,
   buildSemanticThemeTokens,
-  diffPresetAgainstLayout,
+  buildServiceStatusWidget,
+  buildSprintInsightCharts,
+  buildSprintSummary,
+  buildThemePalette,
+  buildUnifiedSearchSuggestions,
+  buildWidgetGallery,
   calculateFlowIndicators,
+  createShareableDashboardLink,
+  diffPresetAgainstLayout,
+  evaluateBacklogHealth,
+  evaluateSearchAndFilterPerformance,
+  generateDailyDigest,
   getWidgetDragPreview,
   getWidgetSizePresets,
-  analyseCommentEngagement,
   mergePresetIntoLayout,
   moveWidgetWithKeyboard,
+  optimiseDashboardLoading,
+  planResponsiveDashboardLayout,
+  prepareCsvExportPlan,
+  prepareSnapshotExport,
   removeWidgetWithUndo,
   reorderWidgetPosition,
-  summariseOverdueTickets,
-  evaluateBacklogHealth,
+  resolveMotionPreferences,
+  resolveRealtimeDataState,
+  resolveThemeMode,
   resizeWidgetInLayout,
+  saveDashboardFilter,
+  scheduleDashboardPdfDelivery,
+  summariseOverdueTickets,
   toggleSectionPresentation,
   undoWidgetRemoval,
-  resolveThemeMode,
-  resolveMotionPreferences,
-  applyBrandThemeCustomisation,
-  type LayoutState,
-  type KeyboardMoveResult,
-  type HomeExperienceInput,
-  type DashboardPreset,
-  type ProjectSnapshot,
-  type SectionState,
-  type WidgetCatalogEntry,
-  type WidgetDefinition,
-  type WidgetAuditLogEntry,
-  type WidgetRemovalResult,
-  type SprintInsightInput,
-  type KanbanLaneStatus,
-  type FlowMetricSample,
-  type TicketInsight,
-  type CommentThreadSummary,
-  type BacklogItemSummary,
+} from '../src/dashboard/dashboardService';
+
+import type {
+  LayoutState,
+  KeyboardMoveResult,
+  HomeExperienceInput,
+  DashboardPreset,
+  ProjectSnapshot,
+  SectionState,
+  WidgetCatalogEntry,
+  WidgetDefinition,
+  WidgetAuditLogEntry,
+  WidgetRemovalResult,
+  SprintInsightInput,
+  KanbanLaneStatus,
+  FlowMetricSample,
+  TicketInsight,
+  CommentThreadSummary,
+  BacklogItemSummary,
+  NotificationEvent,
+  NotificationMuteRule,
+  CriticalAlertEvent,
+  DailyDigestInput,
+  UnifiedSearchEntity,
+  DashboardFilterDefinition,
+  FilterShareOptions,
+  CommandDefinition,
+  QuickFilterInput,
+  SearchPerformanceMetrics,
+  ShareLinkOptions,
+  SnapshotExportInput,
+  PdfScheduleInput,
+  EmbedWidgetInput,
+  CsvExportOptions,
+  LoadingDiagnosticsInput,
+  SecurityDataRequest,
+  SecurityContext,
+  AccessibilityInput,
+  ResponsiveLayoutInput,
+  RealtimeStateOptions,
+  ServiceIncident,
 } from '../src/dashboard/dashboardService';
 
 describe('buildHomeExperience', () => {
@@ -1090,6 +1136,621 @@ describe('applyBrandThemeCustomisation', () => {
       { tenantId: 'tenant-2', applied: false, reason: 'branding-disabled' },
       { tenantId: 'tenant-3', applied: false, reason: 'mode-mismatch' },
     ]);
+  });
+});
+
+describe('buildNotificationInbox', () => {
+  const events: NotificationEvent[] = [
+    {
+      id: 'n1',
+      projectId: 'p1',
+      projectName: 'Alpha',
+      type: 'mention',
+      importance: 'high',
+      title: 'メンション',
+      message: 'コメントで言及されました',
+      createdAt: '2024-03-30T00:00:00Z',
+    },
+    {
+      id: 'n2',
+      projectId: 'p2',
+      projectName: 'Beta',
+      type: 'due',
+      importance: 'medium',
+      title: '期日接近',
+      message: 'タスクの期限が迫っています',
+      createdAt: '2024-03-29T23:00:00Z',
+      readAt: '2024-03-29T23:30:00Z',
+    },
+    {
+      id: 'n3',
+      projectId: 'p1',
+      projectName: 'Alpha',
+      type: 'review',
+      importance: 'critical',
+      title: 'レビュー依頼',
+      message: '重要なレビューが割り当てられました',
+      createdAt: '2024-03-30T01:00:00Z',
+    },
+  ];
+
+  it('フィルタと未読数を正しく計算する', () => {
+    const state = buildNotificationInbox(events, {
+      filters: {
+        projectIds: ['p1'],
+        types: ['mention', 'review'],
+        importance: ['high', 'critical'],
+      },
+      now: new Date('2024-03-30T02:00:00Z'),
+    });
+
+    expect(state.items.map((item) => item.id)).toEqual(['n3', 'n1']);
+    expect(state.unreadCount).toBe(2);
+    expect(state.filteredUnreadCount).toBe(2);
+    expect(state.items[0].receivedAgoMinutes).toBe(60);
+    expect(state.facets.projects[0]).toMatchObject({ id: 'p1', count: 2 });
+    expect(state.badgeCount).toBe(2);
+  });
+});
+
+describe('applyNotificationMuteRules', () => {
+  const events: NotificationEvent[] = [
+    {
+      id: 'm1',
+      projectId: 'p1',
+      type: 'mention',
+      importance: 'medium',
+      title: '通常メンション',
+      message: '通常の通知',
+      createdAt: '2024-03-30T00:10:00Z',
+    },
+    {
+      id: 'm2',
+      projectId: 'p1',
+      type: 'mention',
+      importance: 'critical',
+      title: '重大メンション',
+      message: '必ず確認してください',
+      createdAt: '2024-03-30T00:30:00Z',
+    },
+    {
+      id: 'm3',
+      projectId: 'p2',
+      type: 'digest',
+      importance: 'low',
+      title: 'ダイジェスト',
+      message: 'まとめ情報',
+      createdAt: '2024-03-30T00:45:00Z',
+    },
+  ];
+
+  const rules: NotificationMuteRule[] = [
+    {
+      type: 'mention',
+      createdAt: '2024-03-29T00:00:00Z',
+      until: '2024-03-31T00:00:00Z',
+    },
+    {
+      type: 'digest',
+      createdAt: '2024-03-29T00:00:00Z',
+    },
+  ];
+
+  it('重大アラートを除き通知をミュートし、サマリーを生成する', () => {
+    const now = new Date('2024-03-30T01:00:00Z');
+    const result = applyNotificationMuteRules(events, rules, { now });
+
+    expect(result.delivered.map((event) => event.id)).toEqual(['m2']);
+    expect(result.suppressed.map((event) => event.id)).toEqual(['m1', 'm3']);
+
+    const unmutedSummary = applyNotificationMuteRules(events, rules, {
+      now,
+      unmutedTypes: ['mention'],
+    });
+
+    expect(unmutedSummary.summary).toHaveLength(1);
+    expect(unmutedSummary.summary[0]).toMatchObject({ type: 'mention', count: 1 });
+  });
+});
+
+describe('buildAlertBannerState', () => {
+  const alerts: CriticalAlertEvent[] = [
+    {
+      id: 'a1',
+      title: 'SLA違反',
+      severity: 'critical',
+      category: 'sla',
+      occurredAt: '2024-03-30T00:00:00Z',
+      actionUrl: '/status/sla',
+    },
+    {
+      id: 'a0',
+      title: '過去のインシデント',
+      severity: 'critical',
+      category: 'security',
+      occurredAt: '2024-03-29T00:00:00Z',
+      resolvedAt: '2024-03-29T01:00:00Z',
+      recommendedActions: ['根本原因をレビューする'],
+    },
+  ];
+
+  it('アクティブな重大アラートと履歴を返す', () => {
+    const state = buildAlertBannerState(alerts, {
+      now: new Date('2024-03-30T01:00:00Z'),
+      historyLimit: 3,
+    });
+
+    expect(state.banner?.id).toBe('a1');
+    expect(state.banner?.actions[0].url).toBe('/status/sla');
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0]).toMatchObject({ id: 'a0', durationMinutes: 60 });
+  });
+});
+
+describe('generateDailyDigest', () => {
+  const digestInput: DailyDigestInput = {
+    schedule: { date: '2024-03-30', hour: 9, minute: 0, timeZone: 'Asia/Tokyo' },
+    channels: ['email', 'app', 'email'],
+    widgetPreferences: [
+      { id: 'progress', title: '進捗', enabled: true },
+      { id: 'overdue', title: '期日超過', enabled: false },
+      { id: 'comments', title: 'コメント', enabled: true },
+      { id: 'blockers', title: 'ブロッカー', enabled: true },
+    ],
+    progressUpdates: [
+      { projectId: 'p1', projectName: 'Alpha', completedPoints: 12, deltaPoints: 5 },
+    ],
+    overdueTickets: [
+      { id: 't1', title: '対応タスク', dueDate: '2024-03-30', assignee: 'U1' },
+    ],
+    commentHighlights: [
+      { threadId: 'c1', excerpt: 'レビューをお願いします', unresolved: true, url: '/comments/1' },
+    ],
+    blockers: [
+      { id: 'b1', description: 'API障害', owner: 'Ops', status: 'open', url: '/blockers/1' },
+    ],
+    now: new Date('2024-03-29T23:00:00Z'),
+  };
+
+  it('選択されたウィジェットのみで日次ダイジェストを生成する', () => {
+    const digest = generateDailyDigest(digestInput);
+
+    expect(digest.sections.map((section) => section.id)).toEqual([
+      'progress',
+      'comments',
+      'blockers',
+    ]);
+    expect(digest.excludedWidgets).toContain('overdue');
+    expect(digest.channels).toEqual(['email', 'app']);
+    expect(digest.scheduledFor).toContain('2024-03-30T09:00:00');
+  });
+});
+
+describe('buildUnifiedSearchSuggestions', () => {
+  const entities: UnifiedSearchEntity[] = [
+    {
+      id: 'ticket-1',
+      type: 'ticket',
+      title: 'Alphaの改善タスク',
+      snippet: 'Alphaに関する更新',
+      url: '/tickets/1',
+      updatedAt: '2024-03-28T00:00:00Z',
+      keywords: ['改善', 'alpha'],
+    },
+    {
+      id: 'comment-1',
+      type: 'comment',
+      title: 'Betaの議論',
+      snippet: 'betaでのコメント',
+      url: '/comments/1',
+      updatedAt: '2024-03-29T00:00:00Z',
+      keywords: ['beta'],
+    },
+  ];
+
+  it('横断検索候補と履歴を提供する', () => {
+    const state = buildUnifiedSearchSuggestions('Alpha', entities, {
+      history: [{ query: 'retro', executedAt: '2024-03-20T00:00:00Z' }],
+    });
+
+    expect(state.suggestions).toHaveLength(1);
+    expect(state.suggestions[0].id).toBe('ticket-1');
+    expect(state.history[0].query).toBe('Alpha');
+    expect(state.activeIndex).toBe(0);
+  });
+});
+
+describe('saveDashboardFilter', () => {
+  const definition: DashboardFilterDefinition = {
+    name: '重要フィルタ',
+    description: '重要な案件のみ',
+    visibility: 'team',
+    filters: {
+      project: 'p1',
+      labels: ['urgent'],
+    },
+  };
+
+  const previous: FilterShareOptions['previousVersion'] = {
+    id: 'filter-1',
+    name: '重要フィルタ',
+    description: '旧バージョン',
+    visibility: 'team',
+    filters: { project: 'p2' },
+    version: 1,
+    updatedAt: '2024-03-20T00:00:00Z',
+    updatedBy: 'user-1',
+    shareUrl: 'https://app.example.com/dashboard?project=p2',
+    watchers: ['user-2'],
+  };
+
+  it('フィルタを保存し差分通知を生成する', () => {
+    const result = saveDashboardFilter(definition, {
+      baseUrl: 'https://app.example.com/dashboard',
+      userId: 'user-1',
+      watchers: ['user-2'],
+      previousVersion: previous,
+      now: new Date('2024-03-30T00:00:00Z'),
+    });
+
+    expect(result.filter.shareUrl).toContain('project=p1');
+    expect(result.filter.version).toBe(2);
+    expect(result.diff?.added).toContain('labels');
+    expect(result.notify?.recipients).toEqual(['user-2']);
+  });
+});
+
+describe('buildCommandPalette', () => {
+  const commands: CommandDefinition[] = [
+    {
+      id: 'create-ticket',
+      label: 'チケットを作成',
+      action: 'ticket:create',
+      keywords: ['ticket', 'new'],
+      requiredPermissions: ['ticket.create'],
+    },
+    {
+      id: 'admin-only',
+      label: '管理者設定',
+      action: 'open:admin',
+      requiredPermissions: ['admin.manage'],
+    },
+  ];
+
+  it('権限制御と検索を考慮してコマンド候補を返す', () => {
+    const state = buildCommandPalette(commands, {
+      query: 'ticket',
+      permissions: ['ticket.create'],
+    });
+
+    expect(state.commands).toHaveLength(1);
+    expect(state.commands[0].id).toBe('create-ticket');
+    expect(state.commands[0].matchedKeywords).toContain('ticket');
+    expect(state.totalAvailable).toBe(1);
+  });
+});
+
+describe('buildQuickFilterState', () => {
+  const input: QuickFilterInput = {
+    periods: [
+      { id: 'week', label: '今週', range: { start: '2024-03-25', end: '2024-03-31' } },
+      { id: 'month', label: '今月', range: { start: '2024-03-01', end: '2024-03-31' } },
+    ],
+    assignees: [
+      { id: 'a1', name: 'Alice' },
+      { id: 'a2', name: 'Bob' },
+    ],
+    labels: [
+      { id: 'bug', name: 'バグ' },
+      { id: 'feature', name: '機能' },
+    ],
+    records: [
+      {
+        date: '2024-03-26',
+        assigneeId: 'a1',
+        labelIds: ['bug'],
+        metrics: { velocity: 5, wip: 2 },
+      },
+      {
+        date: '2024-03-27',
+        assigneeId: 'a2',
+        labelIds: ['feature'],
+        metrics: { velocity: 3, wip: 1 },
+      },
+      {
+        date: '2024-04-01',
+        assigneeId: 'a1',
+        labelIds: ['bug'],
+        metrics: { velocity: 4, wip: 1 },
+      },
+    ],
+    active: {
+      periodId: 'week',
+      assigneeIds: ['a1'],
+      labelIds: ['bug'],
+    },
+  };
+
+  it('クイックフィルタ適用後のKPIとチャートを返す', () => {
+    const state = buildQuickFilterState(input);
+
+    expect(state.kpis.velocity).toBe(5);
+    expect(state.assignees.find((assignee) => assignee.id === 'a1')?.selected).toBe(true);
+    expect(state.chart).toHaveLength(1);
+    expect(state.chart[0]).toMatchObject({ date: '2024-03-26' });
+  });
+});
+
+describe('evaluateSearchAndFilterPerformance', () => {
+  it('インデックス遅延とエラーを検出する', () => {
+    const metrics: SearchPerformanceMetrics = {
+      indexUpdatedAt: '2024-03-30T00:00:00Z',
+      now: new Date('2024-03-30T00:12:00Z'),
+      samples: [
+        { query: 'alpha', p95Ms: 1200, errorCount: 0 },
+        { query: 'beta', p95Ms: 800, errorCount: 1 },
+      ],
+      contactUrl: 'https://support.example.com',
+    };
+
+    const state = evaluateSearchAndFilterPerformance(metrics);
+
+    expect(state.indexFresh).toBe(false);
+    expect(state.failingQueries).toHaveLength(2);
+    expect(state.actions[0].url).toContain('support');
+  });
+});
+
+describe('createShareableDashboardLink', () => {
+  it('共有リンクを生成し監査ログを記録する', () => {
+    const options: ShareLinkOptions = {
+      dashboardId: 'dashboard-1',
+      baseUrl: 'https://app.example.com',
+      createdBy: 'user-1',
+      expiresAt: '2024-04-01T00:00:00Z',
+      password: 'secret',
+      ipAllowList: ['192.0.2.0/24'],
+      now: new Date('2024-03-30T00:00:00Z'),
+    };
+
+    const link = createShareableDashboardLink(options);
+
+    expect(link.url).toContain('/share/dashboard-1?token=');
+    expect(link.passwordProtected).toBe(true);
+    expect(link.auditLog?.[0].details).toMatchObject({ dashboardId: 'dashboard-1' });
+  });
+});
+
+describe('prepareSnapshotExport', () => {
+  it('メタデータ付きでスナップショットのエクスポート計画を返す', () => {
+    const input: SnapshotExportInput = {
+      dashboardTitle: 'チームダッシュボード',
+      format: 'pdf',
+      filters: { project: 'p1', privateNotes: '秘密' },
+      user: { id: 'user-1', name: 'Alice' },
+      includePrivateData: false,
+      now: new Date('2024-03-30T00:00:00Z'),
+    };
+
+    const plan = prepareSnapshotExport(input);
+
+    expect(plan.filename).toContain('dashboard');
+    expect(plan.metadata.filters).not.toHaveProperty('privateNotes');
+    expect(plan.printStyles.background).toBe('#FFFFFF');
+  });
+});
+
+describe('scheduleDashboardPdfDelivery', () => {
+  it('定期PDF配信の次回実行とマスキング設定を算出する', () => {
+    const input: PdfScheduleInput = {
+      dashboardId: 'dashboard-1',
+      recipients: [
+        { id: 'user-1', email: 'a@example.com', permissions: ['dashboard.export'] },
+        { id: 'user-2', email: 'b@example.com', permissions: ['dashboard.view'] },
+      ],
+      schedule: {
+        dayOfWeek: 1,
+        hour: 9,
+        minute: 0,
+        timeZone: 'Asia/Tokyo',
+      },
+      now: new Date('2024-03-25T10:00:00Z'),
+      maskFields: ['cost'],
+    };
+
+    const plan = scheduleDashboardPdfDelivery(input);
+
+    expect(plan.recipients).toHaveLength(1);
+    expect(plan.maskFields).toContain('private');
+    expect(plan.nextRun).toContain('09:00:00');
+    expect(plan.notificationOnFailure).toBe(true);
+  });
+});
+
+describe('buildEmbeddedWidgetConfig', () => {
+  it('埋め込みウィジェットの有効性とCSPを返す', () => {
+    const now = new Date('2024-03-30T00:10:00Z');
+    const input: EmbedWidgetInput = {
+      widgetId: 'velocity',
+      origin: 'https://example.com',
+      token: {
+        token: 'signed-token',
+        issuedAt: '2024-03-30T00:00:00Z',
+        expiresAt: '2024-03-30T00:30:00Z',
+        audience: 'velocity',
+      },
+      now,
+    };
+
+    const config = buildEmbeddedWidgetConfig(input);
+
+    expect(config.valid).toBe(true);
+    expect(config.headers['X-Embed-Token']).toBe('signed-token');
+    expect(config.csp['frame-ancestors']).toBe('https://example.com');
+  });
+});
+
+describe('prepareCsvExportPlan', () => {
+  it('CSVエクスポートの分割計画を生成する', () => {
+    const options: CsvExportOptions = {
+      columns: [
+        { key: 'id', label: 'ID', type: 'string' },
+        { key: 'value', label: '値', type: 'number' },
+      ],
+      rows: [
+        { id: '1', value: 10 },
+        { id: '2', value: 20 },
+        { id: '3', value: 30 },
+      ],
+      maxRowsPerFile: 2,
+      locale: 'ja-JP',
+    };
+
+    const plan = prepareCsvExportPlan(options);
+
+    expect(plan.files).toHaveLength(2);
+    expect(plan.files[1].rowStart).toBe(2);
+    expect(plan.columns[0].sample).toBe('1');
+  });
+});
+
+describe('optimiseDashboardLoading', () => {
+  it('読み込み優先度とアセット最適化を決定する', () => {
+    const result = optimiseDashboardLoading({
+      widgets: [
+        { id: 'kpi', priority: 10, estimatedLoadMs: 200 },
+        { id: 'chart', priority: 5, estimatedLoadMs: 500, hasHeavyAssets: true },
+        { id: 'inbox', priority: 2, estimatedLoadMs: 150 },
+      ],
+      networkQuality: 'moderate',
+    });
+
+    expect(result.criticalWidgets).toContain('kpi');
+    expect(result.lazyWidgets).toContain('inbox');
+    expect(result.assetOptimisation[0]).toMatchObject({ id: 'chart', convertTo: 'webp' });
+    expect(result.budgets.firstPaintMs).toBeGreaterThan(2000);
+  });
+});
+
+describe('applyDashboardSecurityGuards', () => {
+  it('テナント制御とマスキングを適用する', () => {
+    const requests: SecurityDataRequest[] = [
+      {
+        resourceId: 'r1',
+        tenantId: 'tenant-1',
+        requiredPermissions: ['dashboard.view'],
+      },
+      {
+        resourceId: 'r2',
+        tenantId: 'tenant-2',
+        requiredPermissions: ['dashboard.view'],
+      },
+      {
+        resourceId: 'r3',
+        tenantId: 'tenant-1',
+        requiredPermissions: ['dashboard.admin'],
+      },
+      {
+        resourceId: 'r4',
+        tenantId: 'tenant-1',
+        requiredPermissions: ['dashboard.view'],
+        containsPersonalData: true,
+      },
+    ];
+
+    const context: SecurityContext = {
+      plan: 'standard',
+      user: {
+        id: 'user-1',
+        tenantId: 'tenant-1',
+        permissions: ['dashboard.view'],
+      },
+    };
+
+    const result = applyDashboardSecurityGuards(requests, context);
+
+    expect(result.authorised.map((request) => request.resourceId)).toContain('r1');
+    expect(result.blocked.map((request) => request.resourceId)).toEqual(['r2', 'r3']);
+    expect(result.masked[0]).toMatchObject({ resourceId: 'r4' });
+  });
+});
+
+describe('buildAccessibilitySupport', () => {
+  it('アクセシビリティの設定を返す', () => {
+    const state = buildAccessibilitySupport({
+      regions: [
+        { id: 'main', role: 'main', label: 'メインコンテンツ' },
+        { id: 'nav', role: 'navigation', label: 'ナビゲーション' },
+      ],
+      supportsReducedMotion: true,
+      highContrastMode: true,
+    });
+
+    expect(state.landmarks).toHaveLength(2);
+    expect(state.focusRing.width).toBe(3);
+    expect(state.colorAnnotations[0]).toContain('色だけでなく');
+    expect(state.reducedMotion).toBe(true);
+  });
+});
+
+describe('planResponsiveDashboardLayout', () => {
+  it('デバイス別レイアウトを返す', () => {
+    const layout = planResponsiveDashboardLayout({
+      widgets: [
+        { id: 'kpi', minColumns: 1, maxColumns: 3, minHeight: 2 },
+        { id: 'chart', minColumns: 2, maxColumns: 4, minHeight: 3 },
+      ],
+      breakpoints: { mobile: 320, tablet: 768, desktop: 1280 },
+    });
+
+    expect(layout.mobile[0].columns).toBe(1);
+    expect(layout.tablet[1].columns).toBe(2);
+    expect(layout.desktop[1].columns).toBe(4);
+  });
+});
+
+describe('resolveRealtimeDataState', () => {
+  it('リアルタイム状態とフォールバックを判定する', () => {
+    const state = resolveRealtimeDataState({
+      sources: [
+        { id: 'primary', status: 'failed', lastUpdated: '2024-03-30T00:00:00Z' },
+        { id: 'secondary', status: 'degraded', lastUpdated: '2024-03-30T00:05:00Z' },
+      ],
+      now: new Date('2024-03-30T00:10:00Z'),
+    });
+
+    expect(state.mode).toBe('fallback');
+    expect(state.degradedSources).toHaveLength(1);
+    expect(state.message).toContain('最後に取得');
+  });
+});
+
+describe('buildServiceStatusWidget', () => {
+  it('サービス状態とアナウンスを構築する', () => {
+    const incidents: ServiceIncident[] = [
+      {
+        id: 'incident-1',
+        status: 'outage',
+        title: 'API障害',
+        startedAt: '2024-03-30T00:00:00Z',
+        updateUrl: 'https://status.example.com/incident-1',
+      },
+      {
+        id: 'incident-0',
+        status: 'degraded',
+        title: '過去の障害',
+        startedAt: '2024-03-29T00:00:00Z',
+        resolvedAt: '2024-03-29T02:00:00Z',
+        updateUrl: 'https://status.example.com/incident-0',
+        impact: '復旧済みです',
+      },
+    ];
+
+    const widget = buildServiceStatusWidget(incidents);
+
+    expect(widget.status).toBe('outage');
+    expect(widget.incidents).toHaveLength(2);
+    expect(widget.announcement?.title).toContain('復旧');
   });
 });
 
